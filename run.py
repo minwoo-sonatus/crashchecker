@@ -11,11 +11,17 @@ import grp
 import tempfile
 import datetime
 
-# Heaptrack download URL
 HEAPTRACK_URL = "https://github.com/KDE/heaptrack/releases/download/v1.5.0/heaptrack-1.5.0-Linux.deb"
 
-# Dockerfile content as a string
-DOCKERFILE_CONTENT = """FROM ubuntu:24.10
+# Default GitHub repository owner and name
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "minwoo-lee/crashchecker")
+
+# Pre-built image from GitHub Container Registry
+CONTAINER_IMAGE_URL = f"ghcr.io/{GITHUB_REPO}/dbg-container:latest"
+
+# Keep the Dockerfile content for reference and for GitHub Actions to build
+DOCKERFILE_CONTENT = """
+FROM ubuntu:24.10
 
 # install build tools (including gcc and g++)
 RUN apt-get update && DEBIAN_FRONTEND="noninteractive" apt-get install -y \\
@@ -79,13 +85,14 @@ class DockerManager:
         self.config_dir = os.path.join(self.user_home, ".config", "coredump_analyzer")
         self.debuginfod_db_path = os.path.join(self.config_dir, ".debuginfod.sqlite")
         self.config_hash = self.get_config_hash()
-        self.docker_image = f"{self.user_name}-dbg-container-{self.config_hash}"
+        self.docker_image = CONTAINER_IMAGE_URL
+        self.local_docker_image = f"{self.user_name}-dbg-container-local-{self.config_hash}"
         self.docker_container = self.get_container_name()
         self.tier = "lge"
         self.yocto_rpm_deploy_postfix = "build_s32g274aevb/tmp/deploy/rpm/"
         self.container_prefix = f"home_{self.user_name}_dbg-container"
+        self.use_prebuilt_image = True  # Use prebuilt image by default
 
-        # Ensure config directory exists
         os.makedirs(self.config_dir, exist_ok=True)
 
     def get_config_hash(self):
@@ -284,7 +291,6 @@ rm "$0"
 
     def create_container(self, force_new=False, remove_all=False):
         """Create docker image and container if they don't exist"""
-        print(f"Docker image name: {self.docker_image}")
         print(f"Docker container name: {self.docker_container}")
 
         # Remove containers based on options
@@ -293,37 +299,49 @@ rm "$0"
         elif force_new:
             self.remove_container()
 
-        # Pull Ubuntu image
-        subprocess.run(['docker', 'pull', 'ubuntu:24.10'], check=True)
+        # Try to pull the pre-built image
+        if self.use_prebuilt_image:
+            print(f"Pulling pre-built image from GitHub Container Registry: {self.docker_image}")
+            pull_result = subprocess.run(['docker', 'pull', self.docker_image], capture_output=True)
 
-        # Check if image exists
-        result = subprocess.run(['docker', 'images', '-q', self.docker_image], capture_output=True, text=True)
-        image_id = result.stdout.strip()
+            if pull_result.returncode != 0:
+                print("Failed to pull pre-built image. Falling back to building locally.")
+                self.use_prebuilt_image = False
+                self.docker_image = self.local_docker_image
 
-        # Build image if it doesn't exist
-        if not image_id:
-            print(f"Building docker image: {self.docker_image}")
+        # If using local image, build if needed
+        if not self.use_prebuilt_image:
+            # Pull Ubuntu image
+            subprocess.run(['docker', 'pull', 'ubuntu:24.10'], check=True)
 
-            # Create a temporary directory for the Docker build context
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Create a temporary Dockerfile
-                dockerfile_path = os.path.join(temp_dir, 'Dockerfile')
-                with open(dockerfile_path, 'w') as f:
-                    f.write(DOCKERFILE_CONTENT.replace('${HEAPTRACK_URL}', HEAPTRACK_URL))
+            # Check if image exists
+            result = subprocess.run(['docker', 'images', '-q', self.docker_image], capture_output=True, text=True)
+            image_id = result.stdout.strip()
 
-                # Build the Docker image
-                build_cmd = [
-                    'docker', 'build', '-t', self.docker_image,
-                    '--build-arg', f'USER_NAME={self.user_name}',
-                    '--build-arg', f'USER_ID={self.user_id}',
-                    '--build-arg', f'GROUP_NAME={self.group_name}',
-                    '--build-arg', f'GROUP_ID={self.group_id}',
-                    '--build-arg', f'USER_HOME={self.user_home}',
-                    '--build-arg', 'HOST=Linux',
-                    temp_dir
-                ]
-                subprocess.run(build_cmd, check=True)
-                print(f"Done building docker image: {self.docker_image}")
+            # Build image if it doesn't exist
+            if not image_id:
+                print(f"Building docker image locally: {self.docker_image}")
+
+                # Create a temporary directory for the Docker build context
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    # Create a temporary Dockerfile
+                    dockerfile_path = os.path.join(temp_dir, 'Dockerfile')
+                    with open(dockerfile_path, 'w') as f:
+                        f.write(DOCKERFILE_CONTENT.replace('${HEAPTRACK_URL}', HEAPTRACK_URL))
+
+                    # Build the Docker image
+                    build_cmd = [
+                        'docker', 'build', '-t', self.docker_image,
+                        '--build-arg', f'USER_NAME={self.user_name}',
+                        '--build-arg', f'USER_ID={self.user_id}',
+                        '--build-arg', f'GROUP_NAME={self.group_name}',
+                        '--build-arg', f'GROUP_ID={self.group_id}',
+                        '--build-arg', f'USER_HOME={self.user_home}',
+                        '--build-arg', 'HOST=Linux',
+                        temp_dir
+                    ]
+                    subprocess.run(build_cmd, check=True)
+                    print(f"Done building docker image: {self.docker_image}")
 
         # Check if container exists
         if not self.container_exists():
@@ -384,9 +402,9 @@ rm "$0"
 
         return subprocess.run(cmd)
 
-    def analyze_coredump(self, coredump_file, force_new_container=False, remove_all_containers=False,
+    def analyze_coredump(self, coredump_file=None, force_new_container=False, remove_all_containers=False,
                          auto_cleanup_days=0, rpms=None, vendor_files=None, yocto_manifest=None):
-        """Analyze the core dump file with GDB"""
+        """Analyze the core dump file with GDB or just start the container if no coredump file"""
         # Ensure container exists and is running
         if not self.container_exists() or force_new_container or remove_all_containers:
             self.create_container(force_new=force_new_container, remove_all=remove_all_containers)
@@ -399,6 +417,10 @@ rm "$0"
 
         # First, start symbol server in the container
         self.start_symbol_server_in_container(rpms, vendor_files, yocto_manifest)
+
+        # If no coredump file provided, we're done (container is running)
+        if coredump_file is None:
+            return None
 
         # Then run gdb-multiarch with the coredump file
         print(f"Starting GDB analysis of {coredump_file}...")
@@ -425,7 +447,7 @@ rm "$0"
         ])
 
         # Create the debuginfod command
-        debuginfod_cmd = self.create_debuginfod_command()
+        debuginfod_cmd = self.create_debuginfod_command(rpms, vendor_files, yocto_manifest)
 
         # Run the debuginfod server in the container
         self.run_command_in_container([
@@ -436,10 +458,24 @@ rm "$0"
         # Give the symbol server a moment to start
         time.sleep(2)
 
-    def create_debuginfod_command(self):
+    def create_debuginfod_command(self, rpms=None, vendor_files=None, yocto_manifest=None):
         """Create the debuginfod command with all the appropriate flags"""
         # Base command with default paths - use config directory for debuginfod.sqlite
-        cmd = f"debuginfod -d {self.debuginfod_db_path} -L"
+        cmd = f"debuginfod -d {self.debuginfod_db_path} -L -R rpms/ -F vendor/"
+
+        # Add additional RPM directories if specified
+        if rpms:
+            for rpm_path in rpms:
+                cmd += f" -R {rpm_path}"
+
+        # Add additional vendor files if specified
+        if vendor_files:
+            for vendor_path in vendor_files:
+                cmd += f" -F {vendor_path}"
+
+        # Add yocto manifest if specified
+        if yocto_manifest and os.path.isdir(f"{yocto_manifest}/{self.tier}/{self.yocto_rpm_deploy_postfix}"):
+            cmd += f" -R {yocto_manifest}/{self.tier}/{self.yocto_rpm_deploy_postfix}"
 
         print(f"Debuginfod command: {cmd}")
         return cmd
@@ -460,11 +496,24 @@ rm "$0"
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Analyze coredump files inside Docker container')
-    parser.add_argument('coredump_file', help='Path to the coredump file to analyze')
+    parser.add_argument('coredump_file', nargs='?', help='Path to the coredump file to analyze')
     parser.add_argument('-N', '--new-container', action='store_true',
                         help='Force create a new container, removing ALL existing debug containers')
     parser.add_argument('-T', '--auto-remove-days', type=int, default=0, metavar='DAYS',
                         help='Automatically remove the container after specified days of inactivity (default: 2 days)')
+    parser.add_argument('-l', '--local-build', action='store_true',
+                        help='Build Docker image locally instead of using pre-built image')
+    parser.add_argument('-i', '--interactive', action='store_true',
+                        help='Start an interactive shell in the container instead of analyzing a coredump')
+    parser.add_argument('-R', dest="rpms", action='extend', nargs='+', type=str,
+                        help='Specify local rpms path')
+    parser.add_argument('-F', dest="vendor", action='extend', nargs='+', type=str,
+                        help='Specify local vendor files(executables, symbols)')
+    parser.add_argument('-t', '--tier', dest='tier', default="lge", type=str,
+                        help='Specify yocto manifest tier for CCU2')
+    parser.add_argument('-m', '--yocto-manifest', dest='yocto_manifest', default="", type=str,
+                        help='Specify local yocto manifest path')
+
     args = parser.parse_args()
 
     # Default to 2 days if -T is provided without a value
@@ -483,18 +532,40 @@ def main():
 
     # Initialize Docker manager
     docker_manager = DockerManager()
+    if args.tier:
+        docker_manager.tier = args.tier
+
+    # Use local build if specified
+    if args.local_build:
+        docker_manager.use_prebuilt_image = False
+        docker_manager.docker_image = docker_manager.local_docker_image
 
     # Ensure rpms and vendor directories exist
     docker_manager.setup_rpms_and_vendor_dirs()
 
-    # Analyze the coredump file
-    docker_manager.analyze_coredump(
-        args.coredump_file,
-        force_new_container=False,
-        remove_all_containers=args.new_container,
-        auto_cleanup_days=args.auto_remove_days,
-    )
+    # If no coredump file is provided, just start the container in interactive mode
+    if args.coredump_file is None or args.interactive:
+        print("No coredump file provided or interactive mode specified. Starting container shell...")
+        if not docker_manager.container_exists() or args.new_container:
+            docker_manager.create_container(force_new=False, remove_all=args.new_container)
+        else:
+            docker_manager.ensure_container_running()
 
+        # Start an interactive shell in the container
+        subprocess.run([
+            'docker', 'exec', '-it', docker_manager.docker_container, '/bin/bash'
+        ])
+    else:
+        # Analyze the coredump file
+        docker_manager.analyze_coredump(
+            args.coredump_file,
+            force_new_container=False,
+            remove_all_containers=args.new_container,
+            auto_cleanup_days=args.auto_remove_days,
+            rpms=args.rpms,
+            vendor_files=args.vendor,
+            yocto_manifest=args.yocto_manifest
+        )
 
 if __name__ == "__main__":
     main()
