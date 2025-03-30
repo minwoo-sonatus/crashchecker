@@ -27,15 +27,21 @@ jobs:
 
       - name: Extract Dockerfile from run.py
         run: |
-          python3 -c "
-          with open('run.py', 'r') as f:
+          python3 -c '
+          import re
+          with open("run.py", "r") as f:
               content = f.read()
-              start = content.find('DOCKERFILE_CONTENT = \"\"\"') + len('DOCKERFILE_CONTENT = \"\"\"')
-              end = content.find('\"\"\"', start)
-              dockerfile = content[start:end]
-              with open('Dockerfile', 'w') as df:
-                  df.write(dockerfile)
-          "
+              dockerfile_match = re.search(r"DOCKERFILE_CONTENT\s*=\s*\"\"\"(.*?)\"\"\"\s*", content, re.DOTALL)
+              if dockerfile_match:
+                  dockerfile = dockerfile_match.group(1).strip()
+                  with open("Dockerfile", "w") as df:
+                      df.write(dockerfile)
+                  print("Successfully extracted Dockerfile")
+              else:
+                  print("Failed to extract Dockerfile content")
+                  exit(1)
+          '
+          cat Dockerfile
 
       - name: Extract metadata for Docker
         id: meta

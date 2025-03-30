@@ -24,9 +24,9 @@ DOCKERFILE_CONTENT = """
 FROM ubuntu:24.10
 
 # install build tools (including gcc and g++)
-RUN apt-get update && DEBIAN_FRONTEND="noninteractive" apt-get install -y \\
-    sudo less curl python3 python3-psutil ca-certificates elfutils unzip xz-utils vim tree tmux ssh iproute2 \\
-    net-tools gdb gdb-multiarch locales binutils fish rpm2cpio rpm cpio debuginfod lldb git \\
+RUN apt-get update && DEBIAN_FRONTEND="noninteractive" apt-get install -y \
+    sudo less curl python3 python3-psutil ca-certificates elfutils unzip xz-utils vim tree tmux ssh iproute2 \
+    net-tools gdb gdb-multiarch locales binutils fish rpm2cpio rpm cpio debuginfod lldb git \
     libboost-program-options1.83.0
 
 # setup user to match host user name and user id
@@ -40,14 +40,14 @@ ARG USER_HOME
 ARG SONATUS_GID
 ARG SONATUS_GNAME
 
-RUN if [ "$HOST" = "Linux" ] ; then \\
-        groupadd -f --system --gid ${GROUP_ID} ${GROUP_NAME} ; \\
-        useradd \\
-            --uid ${USER_ID} \\
-            --shell /bin/bash \\
-            --home ${USER_HOME} \\
-            --create-home ${USER_NAME} ; \\
-    fi
+RUN if [ "$HOST" = "Linux" ] ; then \
+    groupadd -f --system --gid ${GROUP_ID} ${GROUP_NAME} ; \
+    useradd \
+        --uid ${USER_ID} \
+        --shell /bin/bash \
+        --home ${USER_HOME} \
+        --create-home ${USER_NAME} ; \
+fi
 RUN usermod --append --groups sudo ${USER_NAME}
 RUN echo "${USER_NAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
@@ -66,9 +66,9 @@ USER ${USER_NAME}
 RUN cd ${USER_HOME} && git clone https://github.com/pwndbg/pwndbg && cd pwndbg && ./setup.sh
 
 # Install heaptrack via apt-get instead of copying
-RUN sudo apt-get update && sudo apt-get install -y wget && \\
-    cd /tmp && wget -q -O heaptrack.deb ${HEAPTRACK_URL} && \\
-    sudo dpkg -i heaptrack.deb || sudo apt-get -f install -y && \\
+RUN sudo apt-get update && sudo apt-get install -y wget && \
+    cd /tmp && wget -q -O heaptrack.deb ${HEAPTRACK_URL} && \
+    sudo dpkg -i heaptrack.deb || sudo apt-get -f install -y && \
     rm heaptrack.deb
 
 CMD [ "/bin/bash" ]
