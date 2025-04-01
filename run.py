@@ -48,6 +48,7 @@ RUN if [ "$HOST" = "Linux" ] ; then \
         --home ${USER_HOME} \
         --create-home ${USER_NAME} ; \
 fi
+RUN groupadd -f sudo
 RUN usermod --append --groups sudo ${USER_NAME}
 RUN echo "${USER_NAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
