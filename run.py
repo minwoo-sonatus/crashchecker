@@ -67,16 +67,10 @@ RUN git clone https://github.com/pwndbg/pwndbg /tmp/pwndbg && \
     cd /tmp/pwndbg && \
     ./setup.sh
 
-# Install heaptrack via apt-get instead of copying
 RUN set -e && \
-    apt-get update && \
-    apt-get install -y wget
-
-RUN set -e && \
-    cd /tmp && \
-    wget -q -O heaptrack.deb ${HEAPTRACK_URL} && \
-    (dpkg -i heaptrack.deb || (apt-get -f install -y && dpkg -i heaptrack.deb)) && \
-    rm -f heaptrack.deb
+    wget -q -O heaptrack.deb ${HEAPTRACK_URL}
+RUN dpkg -i heaptrack.deb || (apt-get -f install -y && dpkg -i heaptrack.deb)
+RUN rm -f heaptrack.deb
 
 USER ${USER_NAME}
 
