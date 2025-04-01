@@ -61,16 +61,18 @@ ENV LC_ALL=en_US.UTF-8
 ENV DEBUGINFOD_URLS="http://builder-kr-2.kr.sonatus.com:8002 http://127.0.0.1:8002"
 ENV HEAPTRACK_ENABLE_DEBUGINFOD=1
 
-USER ${USER_NAME}
-
 # Install pwndbg
-RUN cd ${USER_HOME} && git clone https://github.com/pwndbg/pwndbg && cd pwndbg && ./setup.sh
+RUN git clone https://github.com/pwndbg/pwndbg /tmp/pwndbg && \
+    cd /tmp/pwndbg && \
+    ./setup.sh
 
 # Install heaptrack via apt-get instead of copying
-RUN sudo apt-get update && sudo apt-get install -y wget && \
+RUN apt-get update && apt-get install -y wget && \
     cd /tmp && wget -q -O heaptrack.deb ${HEAPTRACK_URL} && \
-    sudo dpkg -i heaptrack.deb || sudo apt-get -f install -y && \
+    dpkg -i heaptrack.deb || apt-get -f install -y && \
     rm heaptrack.deb
+
+USER ${USER_NAME}
 
 CMD [ "/bin/bash" ]
 """
