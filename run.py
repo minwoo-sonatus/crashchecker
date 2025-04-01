@@ -58,6 +58,7 @@ ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
 
 # debuginfod envs
+ENV HEAPTRACK_URL="https://github.com/KDE/heaptrack/releases/download/v1.5.0/heaptrack-1.5.0-Linux.deb"
 ENV DEBUGINFOD_URLS="http://builder-kr-2.kr.sonatus.com:8002 http://127.0.0.1:8002"
 ENV HEAPTRACK_ENABLE_DEBUGINFOD=1
 
@@ -69,7 +70,9 @@ RUN git clone https://github.com/pwndbg/pwndbg /tmp/pwndbg && \
 # Install heaptrack via apt-get instead of copying
 RUN set -e && \
     apt-get update && \
-    apt-get install -y wget && \
+    apt-get install -y wget
+
+RUN set -e && \
     cd /tmp && \
     wget -q -O heaptrack.deb ${HEAPTRACK_URL} && \
     (dpkg -i heaptrack.deb || (apt-get -f install -y && dpkg -i heaptrack.deb)) && \
