@@ -41,16 +41,16 @@ ARG SONATUS_GID
 ARG SONATUS_GNAME
 
 RUN if [ "$HOST" = "Linux" ] ; then \
-    groupadd -f --system --gid ${GROUP_ID} ${GROUP_NAME} || true ; \
-    id ${USER_NAME} > /dev/null 2>&1 || useradd \
+    groupadd -f sudo && \
+    groupadd -f --system --gid ${GROUP_ID} ${GROUP_NAME} || true && \
+    useradd \
         --uid ${USER_ID} \
         --shell /bin/bash \
         --home ${USER_HOME} \
-        --create-home ${USER_NAME} || true ; \
+        --groups sudo \
+        --create-home ${USER_NAME} || true && \
+    echo "${USER_NAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers ; \
 fi
-RUN groupadd -f sudo
-RUN usermod --append --groups sudo ${USER_NAME}
-RUN echo "${USER_NAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 RUN locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8
