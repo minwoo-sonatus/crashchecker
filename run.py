@@ -41,12 +41,12 @@ ARG SONATUS_GID
 ARG SONATUS_GNAME
 
 RUN if [ "$HOST" = "Linux" ] ; then \
-    groupadd -f --system --gid ${GROUP_ID} ${GROUP_NAME} ; \
-    useradd \
+    groupadd -f --system --gid ${GROUP_ID} ${GROUP_NAME} || true ; \
+    id ${USER_NAME} > /dev/null 2>&1 || useradd \
         --uid ${USER_ID} \
         --shell /bin/bash \
         --home ${USER_HOME} \
-        --create-home ${USER_NAME} ; \
+        --create-home ${USER_NAME} || true ; \
 fi
 RUN groupadd -f sudo
 RUN usermod --append --groups sudo ${USER_NAME}
