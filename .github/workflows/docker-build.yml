@@ -7,6 +7,10 @@ on:
       - 'run.py'  # Only trigger when run.py changes (contains Dockerfile)
   workflow_dispatch:  # Allow manual trigger
 
+permissions:
+  contents: read
+  packages: write  # 패키지(컨테이너) 쓰기 권한 추가
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest

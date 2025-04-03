@@ -14,7 +14,7 @@ import datetime
 HEAPTRACK_URL = "https://github.com/KDE/heaptrack/releases/download/v1.5.0/heaptrack-1.5.0-Linux.deb"
 
 # Default GitHub repository owner and name
-GITHUB_REPO = os.environ.get("GITHUB_REPO", "minwoo-lee/crashchecker")
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "minwoo-sonatus/crashchecker")
 
 # Pre-built image from GitHub Container Registry
 CONTAINER_IMAGE_URL = f"ghcr.io/{GITHUB_REPO}/dbg-container:latest"
