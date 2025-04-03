@@ -29,28 +29,13 @@ RUN apt-get update && DEBIAN_FRONTEND="noninteractive" apt-get install -y \
     net-tools gdb gdb-multiarch locales binutils fish rpm2cpio rpm cpio debuginfod lldb git \
     libboost-program-options1.83.0
 
-# setup user to match host user name and user id
-# set superuser permissions for new user
-ARG USER_NAME
-ARG USER_ID
-ARG GROUP_NAME
-ARG GROUP_ID
-ARG HOST
-ARG USER_HOME
-ARG SONATUS_GID
-ARG SONATUS_GNAME
-
-RUN if [ "$HOST" = "Linux" ] ; then \
-    groupadd -f sudo && \
-    groupadd -f --system --gid ${GROUP_ID} ${GROUP_NAME} || true && \
-    useradd \
-        --uid ${USER_ID} \
-        --shell /bin/bash \
-        --home ${USER_HOME} \
-        --groups sudo \
-        --create-home ${USER_NAME} || true && \
-    echo "${USER_NAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers ; \
-fi
+# environment variables for user setup
+ENV USER_NAME=""
+ENV USER_ID=""
+ENV GROUP_NAME=""
+ENV GROUP_ID=""
+ENV USER_HOME=""
+ENV HOST=""
 
 RUN locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8
@@ -58,7 +43,6 @@ ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
 
 # debuginfod envs
-ENV HEAPTRACK_URL="https://github.com/KDE/heaptrack/releases/download/v1.5.0/heaptrack-1.5.0-Linux.deb"
 ENV DEBUGINFOD_URLS="http://builder-kr-2.kr.sonatus.com:8002 http://127.0.0.1:8002"
 ENV HEAPTRACK_ENABLE_DEBUGINFOD=1
 
@@ -67,13 +51,27 @@ RUN git clone https://github.com/pwndbg/pwndbg /tmp/pwndbg && \
     cd /tmp/pwndbg && \
     ./setup.sh
 
-RUN set -e && \
-    wget -q -O heaptrack.deb ${HEAPTRACK_URL}
-RUN dpkg -i heaptrack.deb || (apt-get -f install -y && dpkg -i heaptrack.deb)
-RUN rm -f heaptrack.deb
+# Create entrypoint script
+RUN echo '#!/bin/bash\\n\
+if [ "$HOST" = "Linux" ] && [ -n "$USER_NAME" ] && [ -n "$USER_ID" ]; then\\n\
+    groupadd -f sudo\\n\
+    groupadd -f --system --gid ${GROUP_ID} ${GROUP_NAME} || true\\n\
+    useradd \\n\
+        --uid ${USER_ID} \\n\
+        --shell /bin/bash \\n\
+        --home ${USER_HOME} \\n\
+        --groups sudo \\n\
+        --create-home ${USER_NAME} || true\\n\
+    echo "${USER_NAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers\\n\
+fi\\n\
+\\n\
+if [ "$1" = "" ]; then\\n\
+    exec /bin/bash\\n\
+else\\n\
+    exec "$@"\\n\
+fi' > /entrypoint.sh && chmod +x /entrypoint.sh
 
-USER ${USER_NAME}
-
+ENTRYPOINT ["/entrypoint.sh"]
 CMD [ "/bin/bash" ]
 """
 
@@ -302,6 +300,8 @@ rm "$0"
         elif force_new:
             self.remove_container()
 
+        container_existed = self.container_exists()
+
         # Try to pull the pre-built image
         if self.use_prebuilt_image:
             print(f"Pulling pre-built image from GitHub Container Registry: {self.docker_image}")
@@ -330,17 +330,11 @@ rm "$0"
                     # Create a temporary Dockerfile
                     dockerfile_path = os.path.join(temp_dir, 'Dockerfile')
                     with open(dockerfile_path, 'w') as f:
-                        f.write(DOCKERFILE_CONTENT.replace('${HEAPTRACK_URL}', HEAPTRACK_URL))
+                        f.write(DOCKERFILE_CONTENT)
 
-                    # Build the Docker image
+                    # Build the Docker image (without build-args)
                     build_cmd = [
                         'docker', 'build', '-t', self.docker_image,
-                        '--build-arg', f'USER_NAME={self.user_name}',
-                        '--build-arg', f'USER_ID={self.user_id}',
-                        '--build-arg', f'GROUP_NAME={self.group_name}',
-                        '--build-arg', f'GROUP_ID={self.group_id}',
-                        '--build-arg', f'USER_HOME={self.user_home}',
-                        '--build-arg', 'HOST=Linux',
                         temp_dir
                     ]
                     subprocess.run(build_cmd, check=True)
@@ -359,6 +353,13 @@ rm "$0"
                 '--volume', '/var/run/docker.sock:/var/run/docker.sock',
                 '--security-opt', 'seccomp=unconfined',
                 '--privileged',
+                # 환경 변수로 사용자 정보 전달
+                '-e', f'USER_NAME={self.user_name}',
+                '-e', f'USER_ID={self.user_id}',
+                '-e', f'GROUP_NAME={self.group_name}',
+                '-e', f'GROUP_ID={self.group_id}',
+                '-e', f'USER_HOME={self.user_home}',
+                '-e', 'HOST=Linux',
                 '--name', self.docker_container,
                 self.docker_image
             ]
@@ -390,6 +391,9 @@ rm "$0"
 
             # Start the container
             subprocess.run(['docker', 'start', self.docker_container], check=True)
+
+            # Install heaptrack if this is a new container
+            self.install_heaptrack()
         else:
             print("Container already exists, skipping creation")
 
