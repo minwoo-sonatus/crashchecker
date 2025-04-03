@@ -44,7 +44,6 @@ ENV LC_ALL=en_US.UTF-8
 
 # debuginfod envs
 ENV DEBUGINFOD_URLS="http://builder-kr-2.kr.sonatus.com:8002 http://127.0.0.1:8002"
-ENV HEAPTRACK_ENABLE_DEBUGINFOD=1
 
 # Install pwndbg
 RUN git clone https://github.com/pwndbg/pwndbg /tmp/pwndbg && \
@@ -52,77 +51,77 @@ RUN git clone https://github.com/pwndbg/pwndbg /tmp/pwndbg && \
     ./setup.sh
 
 # Create entrypoint script
-RUN echo '#!/bin/bash
-# 디버깅을 위한 로그 출력
-LOG_FILE="/tmp/entrypoint.log"
-echo "================ CONTAINER STARTUP $(date) ================" > $LOG_FILE
-echo "Starting entrypoint script with parameters: $@" >> $LOG_FILE
-echo "Environment variables:" >> $LOG_FILE
-echo "USER_NAME=${USER_NAME}" >> $LOG_FILE
-echo "USER_ID=${USER_ID}" >> $LOG_FILE
-echo "GROUP_NAME=${GROUP_NAME}" >> $LOG_FILE
-echo "GROUP_ID=${GROUP_ID}" >> $LOG_FILE
-echo "USER_HOME=${USER_HOME}" >> $LOG_FILE
-echo "HOST=${HOST}" >> $LOG_FILE
-
-# 사용자 설정
-if [ "$HOST" = "Linux" ] && [ -n "$USER_NAME" ] && [ -n "$USER_ID" ]; then
-    echo "$(date +%T) - Setting up user ${USER_NAME} with ID ${USER_ID}" >> $LOG_FILE
-    
-    echo "$(date +%T) - Creating sudo group" >> $LOG_FILE
-    groupadd -f sudo
-    if [ $? -ne 0 ]; then
-        echo "$(date +%T) - ERROR: Failed to create sudo group" >> $LOG_FILE
-    fi
-    
-    echo "$(date +%T) - Creating user group ${GROUP_NAME} with GID ${GROUP_ID}" >> $LOG_FILE
-    groupadd -f --system --gid ${GROUP_ID} ${GROUP_NAME} || true
-    
-    echo "$(date +%T) - Creating user ${USER_NAME} with UID ${USER_ID}" >> $LOG_FILE
-    useradd \
-        --uid ${USER_ID} \
-        --shell /bin/bash \
-        --home ${USER_HOME} \
-        --groups sudo \
-        --create-home ${USER_NAME} || true
-    
-    if [ $? -ne 0 ]; then
-        echo "$(date +%T) - WARNING: User creation may have failed or user already exists" >> $LOG_FILE
-        echo "$(date +%T) - Checking if user exists" >> $LOG_FILE
-        id ${USER_NAME} >> $LOG_FILE 2>&1
-    fi
-    
-    echo "$(date +%T) - Adding sudo permissions" >> $LOG_FILE
-    echo "${USER_NAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-    
-    echo "$(date +%T) - User setup completed" >> $LOG_FILE
-else
-    echo "$(date +%T) - Skipping user setup, required variables not set." >> $LOG_FILE
-    echo "  HOST=${HOST}" >> $LOG_FILE
-    echo "  USER_NAME=${USER_NAME}" >> $LOG_FILE
-    echo "  USER_ID=${USER_ID}" >> $LOG_FILE
-fi
-
-# 컨테이너가 실행 상태를 유지하도록 함
-if [ -z "$1" ] || [ "$1" = "/bin/bash" ]; then
-    echo "$(date +%T) - Starting bash session" >> $LOG_FILE
-    if [ -n "$USER_NAME" ]; then
-        echo "$(date +%T) - Attempting to switch to user ${USER_NAME}" >> $LOG_FILE
-        
-        # su 명령이 실패하더라도 컨테이너가 종료되지 않도록 함
-        if su ${USER_NAME} -c "bash"; then
-            echo "$(date +%T) - Successfully switched to user ${USER_NAME}" >> $LOG_FILE
-        else
-            echo "$(date +%T) - Failed to switch to user ${USER_NAME}, falling back to root" >> $LOG_FILE
-            bash
-        fi
-    else
-        echo "$(date +%T) - No user specified, running as root" >> $LOG_FILE
-        bash
-    fi
-else
-    echo "$(date +%T) - Running command: $@" >> $LOG_FILE
-    exec "$@"
+RUN echo '#!/bin/bash\n\
+# 디버깅을 위한 로그 출력\n\
+LOG_FILE="/tmp/entrypoint.log"\n\
+echo "================ CONTAINER STARTUP $(date) ================" > $LOG_FILE\n\
+echo "Starting entrypoint script with parameters: $@" >> $LOG_FILE\n\
+echo "Environment variables:" >> $LOG_FILE\n\
+echo "USER_NAME=${USER_NAME}" >> $LOG_FILE\n\
+echo "USER_ID=${USER_ID}" >> $LOG_FILE\n\
+echo "GROUP_NAME=${GROUP_NAME}" >> $LOG_FILE\n\
+echo "GROUP_ID=${GROUP_ID}" >> $LOG_FILE\n\
+echo "USER_HOME=${USER_HOME}" >> $LOG_FILE\n\
+echo "HOST=${HOST}" >> $LOG_FILE\n\
+\n\
+# 사용자 설정\n\
+if [ "$HOST" = "Linux" ] && [ -n "$USER_NAME" ] && [ -n "$USER_ID" ]; then\n\
+    echo "$(date +%T) - Setting up user ${USER_NAME} with ID ${USER_ID}" >> $LOG_FILE\n\
+    \n\
+    echo "$(date +%T) - Creating sudo group" >> $LOG_FILE\n\
+    groupadd -f sudo\n\
+    if [ $? -ne 0 ]; then\n\
+        echo "$(date +%T) - ERROR: Failed to create sudo group" >> $LOG_FILE\n\
+    fi\n\
+    \n\
+    echo "$(date +%T) - Creating user group ${GROUP_NAME} with GID ${GROUP_ID}" >> $LOG_FILE\n\
+    groupadd -f --system --gid ${GROUP_ID} ${GROUP_NAME} || true\n\
+    \n\
+    echo "$(date +%T) - Creating user ${USER_NAME} with UID ${USER_ID}" >> $LOG_FILE\n\
+    useradd \\\n\
+        --uid ${USER_ID} \\\n\
+        --shell /bin/bash \\\n\
+        --home ${USER_HOME} \\\n\
+        --groups sudo \\\n\
+        --create-home ${USER_NAME} || true\n\
+    \n\
+    if [ $? -ne 0 ]; then\n\
+        echo "$(date +%T) - WARNING: User creation may have failed or user already exists" >> $LOG_FILE\n\
+        echo "$(date +%T) - Checking if user exists" >> $LOG_FILE\n\
+        id ${USER_NAME} >> $LOG_FILE 2>&1\n\
+    fi\n\
+    \n\
+    echo "$(date +%T) - Adding sudo permissions" >> $LOG_FILE\n\
+    echo "${USER_NAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers\n\
+    \n\
+    echo "$(date +%T) - User setup completed" >> $LOG_FILE\n\
+else\n\
+    echo "$(date +%T) - Skipping user setup, required variables not set." >> $LOG_FILE\n\
+    echo "  HOST=${HOST}" >> $LOG_FILE\n\
+    echo "  USER_NAME=${USER_NAME}" >> $LOG_FILE\n\
+    echo "  USER_ID=${USER_ID}" >> $LOG_FILE\n\
+fi\n\
+\n\
+# 컨테이너가 실행 상태를 유지하도록 함\n\
+if [ -z "$1" ] || [ "$1" = "/bin/bash" ]; then\n\
+    echo "$(date +%T) - Starting bash session" >> $LOG_FILE\n\
+    if [ -n "$USER_NAME" ]; then\n\
+        echo "$(date +%T) - Attempting to switch to user ${USER_NAME}" >> $LOG_FILE\n\
+        \n\
+        # su 명령이 실패하더라도 컨테이너가 종료되지 않도록 함\n\
+        if su ${USER_NAME} -c "bash"; then\n\
+            echo "$(date +%T) - Successfully switched to user ${USER_NAME}" >> $LOG_FILE\n\
+        else\n\
+            echo "$(date +%T) - Failed to switch to user ${USER_NAME}, falling back to root" >> $LOG_FILE\n\
+            bash\n\
+        fi\n\
+    else\n\
+        echo "$(date +%T) - No user specified, running as root" >> $LOG_FILE\n\
+        bash\n\
+    fi\n\
+else\n\
+    echo "$(date +%T) - Running command: $@" >> $LOG_FILE\n\
+    exec "$@"\n\
 fi' > /entrypoint.sh && chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
