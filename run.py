@@ -11,15 +11,12 @@ import grp
 import tempfile
 import datetime
 
-HEAPTRACK_URL = "https://github.com/KDE/heaptrack/releases/download/v1.5.0/heaptrack-1.5.0-Linux.deb"
-
-# Default GitHub repository owner and name
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "minwoo-sonatus/crashchecker")
-
-# Pre-built image from GitHub Container Registry
 CONTAINER_IMAGE_URL = f"ghcr.io/{GITHUB_REPO}/dbg-container:latest"
 
-# Keep the Dockerfile content for reference and for GitHub Actions to build
+# ------------------------------------------------------------------------------
+# Embedded Dockerfile
+# ------------------------------------------------------------------------------
 DOCKERFILE_CONTENT = """
 FROM ubuntu:24.10
 
@@ -52,7 +49,6 @@ RUN git clone https://github.com/pwndbg/pwndbg /tmp/pwndbg && \
 
 # Create entrypoint script
 RUN echo '#!/bin/bash\n\
-# 디버깅을 위한 로그 출력\n\
 LOG_FILE="/tmp/entrypoint.log"\n\
 echo "================ CONTAINER STARTUP $(date) ================" > $LOG_FILE\n\
 echo "Starting entrypoint script with parameters: $@" >> $LOG_FILE\n\
@@ -127,6 +123,7 @@ fi' > /entrypoint.sh && chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
 CMD [ "/bin/bash" ]
 """
+# ------------------------------------------------------------------------------
 
 class DockerManager:
     def __init__(self):
@@ -343,8 +340,10 @@ rm "$0"
         # Get all containers
         try:
             # List all containers and extract names starting with the prefix
+            cmd = ['docker', 'ps', '-a', '--filter', f"name={self.container_prefix}", '--format', '{{.Names}}']
+            print(f"Running command for existing containers: {' '.join(cmd)}")
             result = subprocess.run(
-                ['docker', 'ps', '-a', '--filter', f"name={self.container_prefix}", '--format', '{{.Names}}'],
+                cmd,
                 capture_output=True, text=True, check=True
             )
 
@@ -540,9 +539,9 @@ rm "$0"
                 print(f"\n===== CONTAINER STARTED SUCCESSFULLY =====")
                 print(f"컨테이너 {self.docker_container}가 성공적으로 시작되었습니다.")
                 
-                # Install heaptrack if this is a new container
-                print("\n===== INSTALLING HEAPTRACK =====")
-                self.install_heaptrack()
+                # # Install heaptrack if this is a new container
+                # print("\n===== INSTALLING HEAPTRACK =====")
+                # self.install_heaptrack()
         else:
             print(f"Container {self.docker_container} already exists, skipping creation")
         
@@ -555,8 +554,14 @@ rm "$0"
             print("\n===== CONTAINER READY =====")
             print(f"Container {self.docker_container} is running and ready to use.")
 
-    def run_command_in_container(self, command, working_dir=None):
-        """Run command inside the container"""
+    def run_command_in_container(self, command, working_dir=None, interactive=False):
+        """Run command inside the container
+        
+        Args:
+            command: 실행할 명령어 (문자열 또는 리스트)
+            working_dir: 작업 디렉토리 경로
+            interactive: True인 경우 사용자 입력을 기다리는 대화형 명령어로 실행
+        """
         print(f"\n===== RUNNING COMMAND IN CONTAINER =====")
         
         cmd = ['docker', 'exec']
@@ -565,26 +570,53 @@ rm "$0"
             print(f"Working directory: {working_dir}")
             cmd.extend(['-w', working_dir])
 
-        cmd.extend(['-it', self.docker_container])
+        if interactive:
+            print("Running in interactive mode")
+            cmd.append('-it')
+        else:
+            print("Running in non-interactive mode")
+        
+        cmd.append(self.docker_container)
         cmd.extend(command if isinstance(command, list) else command.split())
         
         cmd_str = ' '.join(cmd)
         print(f"Executing command: {cmd_str}")
         
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
-        print(f"Command finished with return code: {result.returncode}")
-        if result.stdout:
-            print(f"Command stdout (truncated if large):\n{result.stdout[:1000]}")
-            if len(result.stdout) > 1000:
-                print(f"... (output truncated, total length: {len(result.stdout)} bytes)")
-        
-        if result.stderr:
-            print(f"Command stderr (truncated if large):\n{result.stderr[:1000]}")
-            if len(result.stderr) > 1000:
-                print(f"... (error output truncated, total length: {len(result.stderr)} bytes)")
-        
-        return result
+        if interactive:
+            # 대화형 명령어는 직접 실행하고 결과를 캡처
+            print("Interactive command - output will be shown directly")
+            try:
+                result = subprocess.run(cmd)
+                return result
+            except KeyboardInterrupt:
+                print("Command was interrupted by user")
+                # KeyboardInterrupt가 발생해도 객체를 반환
+                return subprocess.CompletedProcess(cmd, 130, stdout=None, stderr=None)
+        else:
+            # 비대화형 명령어는 출력을 캡처하여 반환
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            print(f"Command finished with return code: {result.returncode}")
+            
+            # stdout 처리 (None인 경우 대비)
+            if hasattr(result, 'stdout') and result.stdout is not None:
+                if result.stdout:
+                    print(f"Command stdout (truncated if large):\n{result.stdout[:1000]}")
+                    if len(result.stdout) > 1000:
+                        print(f"... (output truncated, total length: {len(result.stdout)} bytes)")
+            else:
+                print("Command stdout: None")
+            
+            # stderr 처리 (None인 경우 대비)
+            if hasattr(result, 'stderr') and result.stderr is not None:
+                if result.stderr:
+                    print(f"Command stderr (truncated if large):\n{result.stderr[:1000]}")
+                    if len(result.stderr) > 1000:
+                        print(f"... (error output truncated, total length: {len(result.stderr)} bytes)")
+            else:
+                print("Command stderr: None")
+            
+            return result
 
     def analyze_coredump(self, coredump_file=None, force_new_container=False, remove_all_containers=False,
                          auto_cleanup_days=0, rpms=None, vendor_files=None, yocto_manifest=None):
@@ -634,11 +666,13 @@ rm "$0"
         # Run gdb-multiarch with the command directly
         gdb_cmd = [
             '/bin/bash', '-c',
-            f'gdb-multiarch -ex "thread apply all bt" -c "{coredump_path}"'
+            f'gdb-multiarch -ex "set context-max-threads 100" -ex "thread apply all bt" -c "{coredump_path}"'
         ]
         print(f"GDB command: {gdb_cmd}")
 
-        return self.run_command_in_container(gdb_cmd, self.script_dir)
+        # GDB는 사용자 입력을 기다릴 수 있으므로 대화형 모드로 실행
+        print("Running GDB in interactive mode - you can interact with GDB")
+        return self.run_command_in_container(gdb_cmd, self.script_dir, interactive=True)
 
     def start_symbol_server_in_container(self, rpms=None, vendor_files=None, yocto_manifest=None):
         """Start the debuginfod symbol server inside the container"""
@@ -655,33 +689,166 @@ rm "$0"
 
         # Create the debuginfod command
         print("Creating debuginfod command...")
+        # 로그 파일 경로 설정
+        debuginfod_log_file = "/tmp/debuginfod.log"
         debuginfod_cmd = self.create_debuginfod_command(rpms, vendor_files, yocto_manifest)
+        
+        # 로그 파일로 출력을 리디렉션하도록 수정
+        cmd_with_log = f"{debuginfod_cmd} > {debuginfod_log_file} 2>&1 &"
 
         # Run the debuginfod server in the container
-        print(f"Starting debuginfod with command: {debuginfod_cmd}")
+        print(f"Starting debuginfod with command: {cmd_with_log}")
         server_result = self.run_command_in_container([
             '/bin/bash', '-c',
-            f"DEBUGINFOD_URLS= {debuginfod_cmd} >/dev/null 2>&1 &"
+            f"DEBUGINFOD_URLS= {cmd_with_log}"
         ])
         print(f"Debuginfod start command result: {server_result.returncode}")
 
-        # Give the symbol server a moment to start
-        print("Waiting for symbol server to initialize...")
-        time.sleep(2)
-        
         # Check if debuginfod is running
         check_result = self.run_command_in_container([
             '/bin/bash', '-c',
             "pgrep debuginfod || echo 'Not running'"
         ])
-        print(f"Debuginfod process check: {check_result.stdout.strip()}")
+        if check_result.returncode == 0:
+            # stdout가 None이 아닌 경우에만 strip() 호출
+            if hasattr(check_result, 'stdout') and check_result.stdout is not None:
+                print(f"Debuginfod process check: {check_result.stdout.strip()}")
+                
+                # 인덱싱이 완료될 때까지 기다림
+                print("\n===== WAITING FOR DEBUGINFOD INDEXING =====")
+                print("Waiting for debuginfod to finish indexing...")
+                print("This may take some time depending on the amount of data to index.")
+                print("Press Ctrl+C to stop waiting and continue (debuginfod will still run in background).")
+                
+                try:
+                    # 초기 대기 시간
+                    time.sleep(3)
+                    
+                    # 인덱싱 완료를 확인하는 메시지들
+                    completion_indicators = [
+                        "Finished building scanners for",
+                        "ready to serve requests",
+                        "Connection from",
+                        "Serving request",
+                        "Finished initial database organization"
+                    ]
+                    
+                    # 인덱싱 진행 중을 나타내는 메시지들
+                    progress_indicators = [
+                        "Scanning",
+                        "traverse_elf",
+                        "Processing",
+                        "Indexing",
+                        "Thread",
+                        "archive"
+                    ]
+                    
+                    max_wait_time = 300  # 최대 5분 대기
+                    start_time = time.time()
+                    last_line = ""
+                    last_status_time = time.time()
+                    indexing_complete = False
+                    rpm_count = 0
+                    indexed_count = 0
+                    
+                    print("Progress indicators: ", end="")
+                    sys.stdout.flush()
+                    
+                    while time.time() - start_time < max_wait_time:
+                        # 로그 파일의 마지막 20줄 확인
+                        log_check = self.run_command_in_container([
+                            '/bin/bash', '-c',
+                            f"tail -20 {debuginfod_log_file} 2>/dev/null || echo 'Log file not found'"
+                        ])
+                        
+                        if log_check.returncode == 0 and log_check.stdout:
+                            # 로그 출력
+                            log_lines = log_check.stdout.splitlines()
+                            
+                            # RPM 카운트 업데이트
+                            for line in log_lines:
+                                if "rpm" in line.lower() and any(ind in line for ind in progress_indicators):
+                                    rpm_count += 1
+                                if any(ind in line for ind in completion_indicators):
+                                    indexed_count += 1
+                            
+                            # 마지막 줄 출력 (이전과 다른 경우)
+                            if log_lines and log_lines[-1] != last_line:
+                                last_line = log_lines[-1]
+                                
+                                # 진행 상황을 보여주는 라인인 경우 출력
+                                if any(ind in last_line for ind in progress_indicators + completion_indicators):
+                                    # 3초마다 또는 완료 메시지가 있을 때 상태 업데이트
+                                    if time.time() - last_status_time > 3 or any(ind in last_line for ind in completion_indicators):
+                                        last_status_time = time.time()
+                                        elapsed = int(time.time() - start_time)
+                                        print(f"\rIndexing: {rpm_count} RPMs processed, {indexed_count} completed ({elapsed}s elapsed) ", end="")
+                                        sys.stdout.flush()
+                            
+                            # 인덱싱 완료 확인
+                            for line in log_lines:
+                                if any(ind in line for ind in completion_indicators):
+                                    if rpm_count > 0 and indexed_count > 0:
+                                        print(f"\nDebuginfod indexing seems complete! ({indexed_count}/{rpm_count} items processed)")
+                                        indexing_complete = True
+                                        break
+                            
+                            if indexing_complete:
+                                break
+                        
+                        # 주기적으로 프로세스가 살아있는지 확인
+                        if not self.is_debuginfod_running():
+                            print("\nWARNING: Debuginfod process is no longer running!")
+                            break
+                        
+                        # 진행 중인 것을 보여주는 간단한 인디케이터
+                        if time.time() - last_status_time > 10:
+                            print(".", end="")
+                            sys.stdout.flush()
+                        
+                        # 잠시 대기
+                        time.sleep(1)
+                    
+                    if not indexing_complete and time.time() - start_time >= max_wait_time:
+                        print("\nWaited maximum time for indexing. Continuing anyway...")
+                        print(f"Processed approximately {rpm_count} RPMs so far.")
+                        print("Debuginfod will continue indexing in the background.")
+                        
+                        # 마지막 로그 몇 줄 출력
+                        print("\nLast few lines of debuginfod log:")
+                        tail_result = self.run_command_in_container([
+                            '/bin/bash', '-c',
+                            f"tail -5 {debuginfod_log_file}"
+                        ])
+                        if tail_result.returncode == 0 and tail_result.stdout:
+                            print(tail_result.stdout)
+                
+                except KeyboardInterrupt:
+                    print("\nUser interrupted waiting. Continuing...")
+                    print("Debuginfod will continue indexing in the background.")
+            else:
+                print("Debuginfod process check: Unknown (stdout is None)")
+        else:
+            print(f"Debuginfod process check failed with return code: {check_result.returncode}")
+    
+    def is_debuginfod_running(self):
+        """Check if debuginfod is still running"""
+        check_result = self.run_command_in_container([
+            '/bin/bash', '-c',
+            "pgrep debuginfod > /dev/null && echo 'yes' || echo 'no'"
+        ])
+        
+        if check_result.returncode == 0 and check_result.stdout:
+            return check_result.stdout.strip() == 'yes'
+        return False
 
     def create_debuginfod_command(self, rpms=None, vendor_files=None, yocto_manifest=None):
         """Create the debuginfod command with all the appropriate flags"""
         print("\n===== CREATING DEBUGINFOD COMMAND =====")
         
         # Base command with default paths - use config directory for debuginfod.sqlite
-        cmd = f"debuginfod -d {self.debuginfod_db_path} -L -R rpms/ -F vendor/"
+        # -v 옵션 추가하여 자세한 로그 출력
+        cmd = f"debuginfod -v -d {self.debuginfod_db_path} -L -R rpms/ -F vendor/"
         print(f"Base debuginfod command: {cmd}")
 
         # Add additional RPM directories if specified
@@ -734,27 +901,48 @@ rm "$0"
             'rm -f heaptrack.deb'
         ]
         
+        success = True
+        
         for i, cmd in enumerate(commands):
             print(f"Executing heaptrack installation step {i+1}/3: {cmd}")
-            result = self.run_command_in_container(['sudo', 'bash', '-c', cmd])
-            if result.returncode != 0:
-                print(f"ERROR: heaptrack 설치 중 오류 발생: {cmd}")
-                print(f"Return code: {result.returncode}")
-                return False
+            
+            # sudo 명령어는 항상 대화형으로 처리
+            if 'sudo' in cmd:
+                print("Running with interactive mode (sudo command detected)")
+                interactive_result = self.run_command_in_container(['sudo', 'bash', '-c', cmd], interactive=True)
+                # 대화형 모드에서는 결과가 None일 수 있으므로 특별한 처리 필요
+                if interactive_result is None or interactive_result.returncode != 0:
+                    print(f"ERROR: heaptrack 설치 중 오류 발생: {cmd}")
+                    if interactive_result:
+                        print(f"Return code: {interactive_result.returncode}")
+                    success = False
+                    break
+            else:
+                # 비대화형 명령 실행
+                result = self.run_command_in_container(['bash', '-c', cmd])
+                if result.returncode != 0:
+                    print(f"ERROR: heaptrack 설치 중 오류 발생: {cmd}")
+                    print(f"Return code: {result.returncode}")
+                    success = False
+                    break
+            
             print(f"Step {i+1} completed successfully")
         
-        print("heaptrack 설치 완료")
-        
-        # 설치 확인
-        print("Verifying heaptrack installation...")
-        check_cmd = "which heaptrack"
-        result = self.run_command_in_container(['bash', '-c', check_cmd])
-        if result.returncode == 0:
-            print("heaptrack found in PATH")
+        if success:
+            print("heaptrack 설치 완료")
+            
+            # 설치 확인
+            print("Verifying heaptrack installation...")
+            check_cmd = "which heaptrack"
+            result = self.run_command_in_container(['bash', '-c', check_cmd])
+            if result.returncode == 0:
+                print("heaptrack found in PATH")
+            else:
+                print("WARNING: heaptrack command not found in PATH")
         else:
-            print("WARNING: heaptrack command not found in PATH")
+            print("heaptrack 설치 실패")
         
-        return True
+        return success
 
 
 def parse_args():
@@ -834,11 +1022,11 @@ def main():
         # Start an interactive shell in the container
         print("\n===== STARTING INTERACTIVE SHELL =====")
         print(f"Connecting to container {docker_manager.docker_container}...")
-        shell_cmd = [
-            'docker', 'exec', '-it', docker_manager.docker_container, '/bin/bash'
-        ]
-        print(f"Command: {' '.join(shell_cmd)}")
-        subprocess.run(shell_cmd)
+        
+        # 대화형 모드로 bash 실행
+        bash_cmd = ['/bin/bash']
+        docker_manager.run_command_in_container(bash_cmd, interactive=True)
+        
         print("\n===== INTERACTIVE SHELL EXITED =====")
     else:
         # Analyze the coredump file
